@@ -4,11 +4,11 @@ A fully-featured Discord music bot built with TypeScript, discord.js v14, and yt
 
 ## Features
 
-- 🎵 Play music from YouTube by name or URL
-- 📋 Queue system with multiple tracks
-- ⏭️ Skip, pause, resume controls
-- 🔊 Clean audio pipeline via yt-dlp + ffmpeg
-- ⚡ Slash commands (`/play`, `/skip`, etc.)
+- Play music from YouTube by name or URL
+- Queue system with multiple tracks
+- Skip, pause, resume controls
+- Clean audio pipeline via yt-dlp + ffmpeg
+- Slash commands (`/play`, `/skip`, etc.)
 
 ## Tech Stack
 
