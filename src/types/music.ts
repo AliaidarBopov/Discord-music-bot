@@ -5,6 +5,8 @@ export interface Track {
   url: string;
   duration: string;
   requestedBy: string;
+  artist?: string;
+  thumbnailUrl?: string;
 }
 
 export interface GuildQueueOptions {

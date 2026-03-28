@@ -7,6 +7,7 @@ import { stopCommand } from "./commands/stop";
 import { pauseCommand } from "./commands/pause";
 import { resumeCommand } from "./commands/resume";
 import { queueCommand } from "./commands/queue";
+import { handleMusicControlButton, isMusicControlButton } from "./commands/musicControls";
 
 const client = new Client({
   intents: [
@@ -23,6 +24,11 @@ client.once(Events.ClientReady, (c) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton() && isMusicControlButton(interaction.customId)) {
+    await handleMusicControlButton(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
   await commandHandler.handle(interaction as ChatInputCommandInteraction);
 });

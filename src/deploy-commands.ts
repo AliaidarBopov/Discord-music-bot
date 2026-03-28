@@ -24,15 +24,12 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN!);
 
     // Регистрация глобально (появится на всех серверах через ~1 час)
     // Для мгновенного появления на одном сервере используй Routes.applicationGuildCommands()
-    const guilds = [process.env.GUILD_ID!, "440180837292441603"];
-
-    for (const guildId of guilds) {
-      await rest.put(
-        Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
-        { body: commands }
-      );
-      console.log(`✅ Команды зарегистрированы на сервере ${guildId}`);
-    }
+    // Глобальная регистрация — команды появятся на ВСЕХ серверах (~1 час)
+    await rest.put(
+      Routes.applicationCommands(process.env.CLIENT_ID!),
+      { body: commands }
+    );
+    console.log("✅ Команды зарегистрированы глобально");
 
     console.log("✅ Команды успешно зарегистрированы!");
   } catch (err) {
