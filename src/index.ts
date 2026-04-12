@@ -2,6 +2,9 @@ import "dotenv/config";
 import { Client, GatewayIntentBits, Events, ChatInputCommandInteraction } from "discord.js";
 import { commandHandler } from "./commands/CommandHandler";
 import { playCommand } from "./commands/play";
+import { mashupCommand } from "./commands/mashup";
+import { gachiCommand } from "./commands/gachi";
+import { playlistCommand } from "./commands/playlist";
 import { skipCommand } from "./commands/skip";
 import { stopCommand } from "./commands/stop";
 import { pauseCommand } from "./commands/pause";
@@ -16,7 +19,7 @@ const client = new Client({
   ],
 });
 
-[playCommand, skipCommand, stopCommand, pauseCommand, resumeCommand, queueCommand]
+[playCommand, mashupCommand, gachiCommand, playlistCommand, skipCommand, stopCommand, pauseCommand, resumeCommand, queueCommand]
   .forEach((cmd) => commandHandler.register(cmd));
 
 client.once(Events.ClientReady, (c) => {

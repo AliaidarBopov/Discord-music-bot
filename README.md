@@ -40,6 +40,11 @@ Create a `.env` file in the root directory:
 ```env
 DISCORD_TOKEN=your_bot_token
 CLIENT_ID=your_application_id
+```
+
+Optional for instant testing in one server:
+
+```env
 GUILD_ID=your_server_id
 ```
 
@@ -47,15 +52,19 @@ Get your token and client ID from [Discord Developer Portal](https://discord.com
 
 ### 4. Enable required intents
 
-In the Developer Portal → Bot, enable:
-- ✅ Server Members Intent
-- ✅ Message Content Intent
+In the Developer Portal -> Bot, enable:
+
+- Server Members Intent
+- Message Content Intent
 
 ### 5. Register slash commands
 
 ```bash
 npm run deploy
 ```
+
+If `GUILD_ID` is set, commands are registered only for that server and appear almost instantly.
+If `GUILD_ID` is not set, commands are registered globally for every server where the bot is invited.
 
 ### 6. Start the bot
 
@@ -81,30 +90,33 @@ npm start
 
 ## Project Structure
 
-```
+```text
 src/
-├── index.ts                  # Entry point
-├── deploy-commands.ts        # Slash command registration
-├── types/
-│   └── music.ts              # Track and Queue interfaces
-├── music/
-│   ├── MusicManager.ts       # Singleton queue manager
-│   └── GuildQueue.ts         # Per-server queue and player
-└── commands/
-    ├── CommandHandler.ts     # Command router
-    ├── play.ts
-    ├── skip.ts
-    ├── stop.ts
-    ├── pause.ts
-    ├── resume.ts
-    └── queue.ts
+|-- index.ts                  # Entry point
+|-- deploy-commands.ts        # Slash command registration
+|-- types/
+|   `-- music.ts              # Track and Queue interfaces
+|-- music/
+|   |-- MusicManager.ts       # Singleton queue manager
+|   `-- GuildQueue.ts         # Per-server queue and player
+`-- commands/
+    |-- CommandHandler.ts     # Command router
+    |-- play.ts
+    |-- skip.ts
+    |-- stop.ts
+    |-- pause.ts
+    |-- resume.ts
+    `-- queue.ts
 ```
 
 ## Hosting
 
-For free 24/7 hosting, use:
-- [Railway](https://railway.app) — easiest setup, ~$5 free credit/month
-- [Oracle Cloud Free Tier](https://cloud.oracle.com) — always free VPS
+For a bot that should stay online even when your PC is off, see [DEPLOY_24_7_FREE.md](DEPLOY_24_7_FREE.md).
+
+Short version:
+
+- Oracle Cloud Always Free VM is the most realistic free 24/7 option.
+- Railway, Render, and Koyeb are convenient, but their free tiers are not a reliable true always-on setup for a Discord music bot.
 
 Set environment variables on your hosting platform instead of using a `.env` file.
 

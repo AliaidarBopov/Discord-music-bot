@@ -24,8 +24,8 @@ export function createNowPlayingControlsRow(isPaused: boolean): ActionRowBuilder
       .setStyle(toggleStyle),
     new ButtonBuilder()
       .setCustomId(MUSIC_CONTROL_CUSTOM_IDS.skip)
-      .setLabel("Next")
-      .setEmoji("⏩")
+      .setLabel("Skip")
+      .setEmoji("⏭️")
       .setStyle(ButtonStyle.Secondary)
   );
 }
@@ -38,13 +38,19 @@ export function isMusicControlButton(customId: string): boolean {
 
 export async function handleMusicControlButton(interaction: ButtonInteraction): Promise<void> {
   if (!interaction.guildId) {
-    await interaction.reply({ content: "⚠️ Кнопки работают только на сервере.", ephemeral: true });
+    await interaction.reply({
+      content: "⚠️ Кнопки работают только на сервере.",
+      ephemeral: true,
+    });
     return;
   }
 
   const queue = musicManager.getQueue(interaction.guildId);
   if (!queue) {
-    await interaction.reply({ content: "⚠️ Сейчас ничего не играет.", ephemeral: true });
+    await interaction.reply({
+      content: "⚠️ Сейчас ничего не играет.",
+      ephemeral: true,
+    });
     return;
   }
 
@@ -64,14 +70,33 @@ export async function handleMusicControlButton(interaction: ButtonInteraction): 
 
     case MUSIC_CONTROL_CUSTOM_IDS.skip: {
       if (!queue.isPlaying) {
-        await interaction.deferUpdate();
+        await interaction.reply({
+          content: "⚠️ Сейчас ничего не играет.",
+          ephemeral: true,
+        });
         return;
       }
 
-      queue.skip();
-      await interaction.update({
-        components: [createNowPlayingControlsRow(false)],
-      });
+      const hasNext = queue.tracks.length > 0;
+      const skipped = queue.skip();
+
+      if (!skipped) {
+        await interaction.reply({
+          content: "⚠️ Не удалось пропустить текущий трек.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await interaction.deferUpdate();
+
+      if (!hasNext) {
+        await interaction.followUp({
+          content: "📭 В очереди больше нет песен.",
+          ephemeral: true,
+        });
+      }
+
       return;
     }
 

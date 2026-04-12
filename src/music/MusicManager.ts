@@ -83,6 +83,10 @@ class MusicManager {
     connection.subscribe(queue.player);
     console.log(`[MusicManager] Player подписан на соединение ✅`);
 
+    connection.on(VoiceConnectionStatus.Destroyed, () => {
+      this.queues.delete(options.guildId);
+    });
+
     this.queues.set(options.guildId, queue);
     return queue;
   }

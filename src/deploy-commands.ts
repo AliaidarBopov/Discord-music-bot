@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { REST, Routes } from "discord.js";
 import { playCommand } from "./commands/play";
+import { mashupCommand } from "./commands/mashup";
+import { gachiCommand } from "./commands/gachi";
+import { playlistCommand } from "./commands/playlist";
 import { skipCommand } from "./commands/skip";
 import { stopCommand } from "./commands/stop";
 import { pauseCommand } from "./commands/pause";
@@ -9,6 +12,9 @@ import { queueCommand } from "./commands/queue";
 
 const commands = [
   playCommand,
+  mashupCommand,
+  gachiCommand,
+  playlistCommand,
   skipCommand,
   stopCommand,
   pauseCommand,
@@ -17,22 +23,28 @@ const commands = [
 ].map((cmd) => cmd.data.toJSON());
 
 const rest = new REST().setToken(process.env.DISCORD_TOKEN!);
+const clientId = process.env.CLIENT_ID!;
+const guildId = process.env.GUILD_ID;
 
 (async () => {
   try {
-    console.log("🔄 Регистрирую slash-команды...");
+    if (guildId) {
+      console.log("Registering slash commands for one guild...");
+      await rest.put(
+        Routes.applicationGuildCommands(clientId, guildId),
+        { body: commands }
+      );
+      console.log("Guild commands registered successfully.");
+      return;
+    }
 
-    // Регистрация глобально (появится на всех серверах через ~1 час)
-    // Для мгновенного появления на одном сервере используй Routes.applicationGuildCommands()
-    // Глобальная регистрация — команды появятся на ВСЕХ серверах (~1 час)
+    console.log("Registering global slash commands...");
     await rest.put(
-      Routes.applicationCommands(process.env.CLIENT_ID!),
+      Routes.applicationCommands(clientId),
       { body: commands }
     );
-    console.log("✅ Команды зарегистрированы глобально");
-
-    console.log("✅ Команды успешно зарегистрированы!");
+    console.log("Global commands registered successfully.");
   } catch (err) {
-    console.error("❌ Ошибка регистрации команд:", err);
+    console.error("Failed to register commands:", err);
   }
 })();
