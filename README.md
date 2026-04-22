@@ -40,6 +40,9 @@ Create a `.env` file in the root directory:
 ```env
 DISCORD_TOKEN=your_bot_token
 CLIENT_ID=your_application_id
+
+# Optional: path to a YouTube cookies file for yt-dlp (helps with age-restricted videos)
+YTDLP_COOKIES=C:\\path\\to\\yt-cookies.txt
 ```
 
 Optional for instant testing in one server:
