@@ -85,7 +85,8 @@ export class GuildQueue {
 
       const ytDlpArgs: string[] = [
         "-f",
-        "bestaudio/best",
+        // Prefer m4a (often more stable than webm when piping)
+        "bestaudio[ext=m4a]/bestaudio/best",
         "-o",
         "-",
         "--quiet",
@@ -98,9 +99,9 @@ export class GuildQueue {
         "3",
         "--socket-timeout",
         "15",
-        // Can speed up chunked downloads
+        // Keep it conservative when streaming to stdout
         "--concurrent-fragments",
-        "4",
+        "1",
       ];
 
       const cookiesPath = (process.env.YTDLP_COOKIES ?? "").trim();
