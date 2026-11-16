@@ -13,10 +13,10 @@ import {
 import { EmbedBuilder, Message, TextChannel, VoiceChannel } from "discord.js";
 import { LoopMode, Track } from "../types/music";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import path from "path";
-import fs from "fs";
 import ffmpegStatic from "ffmpeg-static";
 import { createNowPlayingControlsRow } from "../commands/musicControls";
+import { AUDIO_FORMAT, getCommonYtDlpArgs, getYtDlpPath } from "./ytDlp";
+import { TrackPrefetcher, removeFile } from "./TrackPrefetcher";
 
 export class GuildQueue {
   public readonly guildId: string;
@@ -49,6 +49,7 @@ export class GuildQueue {
   private _suppressRequeue = false;
   /** Текущий трек реально начал играть (сломанные треки не повторяем) */
   private _currentStarted = false;
+  private readonly _prefetcher = new TrackPrefetcher();
 
   constructor(
     connection: VoiceConnection,
@@ -66,6 +67,7 @@ export class GuildQueue {
 
   public enqueue(track: Track): void {
     this.tracks.push(track);
+    this._refreshPrefetch();
   }
 
   public async playNext(): Promise<void> {
@@ -85,110 +87,24 @@ export class GuildQueue {
 
     try {
       this._cleanupPlaybackPipeline();
-      console.log(`[GuildQueue] Getting stream for: ${this.currentTrack.url}`);
+      const track = this.currentTrack;
 
-      const ytDlpPath = path.join(
-        __dirname,
-        "..",
-        "..",
-        "node_modules",
-        "youtube-dl-exec",
-        "bin",
-        process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
-      );
+      // Если трек уже подгружен заранее — играем из файла, без ~10 с ожидания yt-dlp
+      const prefetchedFile = await this._prefetcher.take(track.url);
+      let ytDlpStream: { process: ChildProcessWithoutNullStreams; firstChunk: Buffer } | null = null;
 
-      const ytDlpArgs: string[] = [
-        "-f",
-        // Prefer m4a (often more stable than webm when piping)
-        "bestaudio[ext=m4a]/bestaudio/best",
-        "-o",
-        "-",
-        "--quiet",
-        "--no-warnings",
-        "--no-playlist",
-        // Stability tweaks
-        "--retries",
-        "3",
-        "--fragment-retries",
-        "3",
-        "--socket-timeout",
-        "15",
-        // Keep it conservative when streaming to stdout
-        "--concurrent-fragments",
-        "1",
-        // YouTube requires solving JS challenges; without a runtime it returns 403
-        "--js-runtimes",
-        `node:${process.execPath}`,
-      ];
-
-      const cookiesPath = (process.env.YTDLP_COOKIES ?? "").trim();
-      if (cookiesPath) {
-        if (fs.existsSync(cookiesPath)) {
-          ytDlpArgs.push("--cookies", cookiesPath);
-        } else {
-          console.warn(`[GuildQueue] YTDLP_COOKIES file not found: ${cookiesPath}`);
-        }
+      if (prefetchedFile) {
+        console.log(`[GuildQueue] Playing prefetched file for: ${track.url}`);
+      } else {
+        console.log(`[GuildQueue] Getting stream for: ${track.url}`);
+        ytDlpStream = await this._startYtDlpStream(track.url);
       }
-
-      ytDlpArgs.push(this.currentTrack.url);
-
-      const ytDlpProcess = spawn(ytDlpPath, ytDlpArgs, {
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      }) as ChildProcessWithoutNullStreams;
-      this._ytDlpProcess = ytDlpProcess;
-
-      let ytDlpStderr = "";
-      ytDlpProcess.stderr.on("data", (data) => {
-        const chunk = data.toString();
-        ytDlpStderr += chunk;
-        // keep it bounded
-        if (ytDlpStderr.length > 20_000) ytDlpStderr = ytDlpStderr.slice(-20_000);
-        console.error("[yt-dlp error]", chunk);
-      });
-
-      ytDlpProcess.on("error", (error) => console.error("[yt-dlp spawn error]", error));
-
-      // Start ffmpeg only after yt-dlp actually produced data.
-      // This prevents ffmpeg from trying to decode an empty/failed yt-dlp output (pipe:0 invalid data).
-      const firstStdoutChunk: Buffer = await new Promise((resolve, reject) => {
-        const onData = (chunk: Buffer) => {
-          cleanup();
-          resolve(chunk);
-        };
-
-        const onClose = (code: number | null) => {
-          cleanup();
-          if (code === 0) {
-            reject(new Error("yt-dlp завершился без вывода аудио"));
-            return;
-          }
-
-          const msg = ytDlpStderr.trim() || `yt-dlp завершился с кодом ${code}`;
-          reject(new Error(msg));
-        };
-
-        const onError = (err: unknown) => {
-          cleanup();
-          reject(err);
-        };
-
-        const cleanup = () => {
-          ytDlpProcess.stdout.off("data", onData);
-          ytDlpProcess.off("close", onClose);
-          ytDlpProcess.off("error", onError);
-        };
-
-        ytDlpProcess.stdout.once("data", onData);
-        ytDlpProcess.once("close", onClose);
-        ytDlpProcess.once("error", onError);
-      });
 
       const ffmpegProcess = spawn(
         ffmpegStatic!,
         [
         "-i",
-        "pipe:0",
+        prefetchedFile ?? "pipe:0",
         "-vn",
         "-f",
         "s16le",
@@ -221,9 +137,14 @@ export class GuildQueue {
       ffmpegProcess.stderr.on("data", (data) => console.error("[ffmpeg error]", data.toString()));
       ffmpegProcess.on("error", (error) => console.error("[ffmpeg spawn error]", error));
 
-      // Feed the first chunk we already consumed, then pipe the rest.
-      ffmpegProcess.stdin.write(firstStdoutChunk);
-      ytDlpProcess.stdout.pipe(ffmpegProcess.stdin);
+      if (prefetchedFile) {
+        ffmpegProcess.once("close", () => removeFile(prefetchedFile));
+        ffmpegProcess.stdin.end();
+      } else if (ytDlpStream) {
+        // Feed the first chunk we already consumed, then pipe the rest.
+        ffmpegProcess.stdin.write(ytDlpStream.firstChunk);
+        ytDlpStream.process.stdout.pipe(ffmpegProcess.stdin);
+      }
 
       const resource: AudioResource = createAudioResource(ffmpegProcess.stdout, {
         inputType: StreamType.Raw,
@@ -238,6 +159,7 @@ export class GuildQueue {
       await entersState(this.player, AudioPlayerStatus.Playing, 15_000);
       console.log("[GuildQueue] Player entered Playing state.");
       this._currentStarted = true;
+      this._refreshPrefetch();
 
       const nowPlayingEmbed = new EmbedBuilder()
         .setColor(0x1f9d8b)
@@ -296,6 +218,7 @@ export class GuildQueue {
 
   public stop(): void {
     this.tracks = [];
+    this._prefetcher.cancel();
     this._resetPlaybackState();
     void this._clearNowPlayingControls();
     this._cleanupPlaybackPipeline();
@@ -327,6 +250,7 @@ export class GuildQueue {
 
   public setLoopMode(mode: LoopMode): void {
     this.loopMode = mode;
+    this._refreshPrefetch();
   }
 
   /** Перемешивает треки в очереди (текущий не трогает), возвращает их количество */
@@ -335,7 +259,101 @@ export class GuildQueue {
       const j = Math.floor(Math.random() * (i + 1));
       [this.tracks[i], this.tracks[j]] = [this.tracks[j], this.tracks[i]];
     }
+    this._refreshPrefetch();
     return this.tracks.length;
+  }
+
+  /** Какой трек заиграет следующим, с учётом режима повтора */
+  private _nextTrackUrl(): string | null {
+    if (this.loopMode === "track" && this.currentTrack) return this.currentTrack.url;
+    if (this.tracks.length > 0) return this.tracks[0].url;
+    if (this.loopMode === "queue" && this.currentTrack) return this.currentTrack.url;
+    return null;
+  }
+
+  /** Подгружает следующий трек, пока играет текущий (меняет заготовку, если очередь изменилась) */
+  private _refreshPrefetch(): void {
+    if (!this.isPlaying || !this._currentStarted) return;
+    this._prefetcher.prefetch(this._nextTrackUrl());
+  }
+
+  /** Запускает yt-dlp в stdout и ждёт первые данные (чтобы ffmpeg не получил пустой поток) */
+  private async _startYtDlpStream(
+    url: string
+  ): Promise<{ process: ChildProcessWithoutNullStreams; firstChunk: Buffer }> {
+    const ytDlpArgs: string[] = [
+      "-f",
+      AUDIO_FORMAT,
+      "-o",
+      "-",
+      "--quiet",
+      "--no-warnings",
+      "--no-playlist",
+      // Stability tweaks
+      "--retries",
+      "3",
+      "--fragment-retries",
+      "3",
+      "--socket-timeout",
+      "15",
+      // Keep it conservative when streaming to stdout
+      "--concurrent-fragments",
+      "1",
+      ...getCommonYtDlpArgs(),
+      url,
+    ];
+
+    const ytDlpProcess = spawn(getYtDlpPath(), ytDlpArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    }) as ChildProcessWithoutNullStreams;
+    this._ytDlpProcess = ytDlpProcess;
+
+    let ytDlpStderr = "";
+    ytDlpProcess.stderr.on("data", (data) => {
+      const chunk = data.toString();
+      ytDlpStderr += chunk;
+      // keep it bounded
+      if (ytDlpStderr.length > 20_000) ytDlpStderr = ytDlpStderr.slice(-20_000);
+      console.error("[yt-dlp error]", chunk);
+    });
+
+    ytDlpProcess.on("error", (error) => console.error("[yt-dlp spawn error]", error));
+
+    const firstChunk: Buffer = await new Promise((resolve, reject) => {
+      const onData = (chunk: Buffer) => {
+        cleanup();
+        resolve(chunk);
+      };
+
+      const onClose = (code: number | null) => {
+        cleanup();
+        if (code === 0) {
+          reject(new Error("yt-dlp завершился без вывода аудио"));
+          return;
+        }
+
+        const msg = ytDlpStderr.trim() || `yt-dlp завершился с кодом ${code}`;
+        reject(new Error(msg));
+      };
+
+      const onError = (err: unknown) => {
+        cleanup();
+        reject(err);
+      };
+
+      const cleanup = () => {
+        ytDlpProcess.stdout.off("data", onData);
+        ytDlpProcess.off("close", onClose);
+        ytDlpProcess.off("error", onError);
+      };
+
+      ytDlpProcess.stdout.once("data", onData);
+      ytDlpProcess.once("close", onClose);
+      ytDlpProcess.once("error", onError);
+    });
+
+    return { process: ytDlpProcess, firstChunk };
   }
 
   /** Возвращает закончившийся трек в очередь в зависимости от режима повтора */
@@ -412,6 +430,7 @@ export class GuildQueue {
 
     this.connection.on(VoiceConnectionStatus.Destroyed, () => {
       this.tracks = [];
+      this._prefetcher.cancel();
       this._resetPlaybackState();
       void this._clearNowPlayingControls();
       this._cleanupPlaybackPipeline();
@@ -421,6 +440,7 @@ export class GuildQueue {
 
   private async _handleVoiceChannelLeave(): Promise<void> {
     this.tracks = [];
+    this._prefetcher.cancel();
     this._resetPlaybackState();
     await this._clearNowPlayingControls();
     this._cleanupPlaybackPipeline();

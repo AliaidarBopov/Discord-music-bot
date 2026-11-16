@@ -1,8 +1,7 @@
 import { EmbedBuilder } from "discord.js";
 import { spawn } from "child_process";
-import fs from "fs";
-import path from "path";
 import { Track } from "../types/music";
+import { getCommonYtDlpArgs, getYtDlpPath } from "./ytDlp";
 
 type SearchableVideo = {
   title?: string | null;
@@ -43,7 +42,8 @@ export async function resolveSingleTrack(query: string, requestedBy: string): Pr
       return video ? mapVideoToTrack(video, requestedBy) : null;
     }
 
-    const video = await ytDlpResolveSingle(`ytsearch1:${query}`);
+    // Быстрый поиск: только выдача поиска, без разбора самого видео (~3 с вместо ~7 с)
+    const video = (await ytDlpSearchFlat(query)) ?? (await ytDlpResolveSingle(`ytsearch1:${query}`));
     return video ? mapVideoToTrack(video, requestedBy) : null;
   } catch (error) {
     console.error("[resolveSingleTrack] Failed to resolve single track:", error);
@@ -219,28 +219,6 @@ function shuffleInPlace<T>(values: T[]): void {
   }
 }
 
-function getYtDlpPath(): string {
-  return path.join(
-    __dirname,
-    "..",
-    "..",
-    "node_modules",
-    "youtube-dl-exec",
-    "bin",
-    process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
-  );
-}
-
-function getCookiesArgs(): string[] {
-  const cookiesPath = (process.env.YTDLP_COOKIES ?? "").trim();
-  if (!cookiesPath) return [];
-  if (!fs.existsSync(cookiesPath)) {
-    console.warn(`[trackResolver] YTDLP_COOKIES file not found: ${cookiesPath}`);
-    return [];
-  }
-  return ["--cookies", cookiesPath];
-}
-
 async function ytDlpDumpSingleJson(args: string[]): Promise<any> {
   const ytDlpPath = getYtDlpPath();
   const baseArgs = [
@@ -252,10 +230,7 @@ async function ytDlpDumpSingleJson(args: string[]): Promise<any> {
     "15",
     "--retries",
     "2",
-    // YouTube requires solving JS challenges; without a runtime some formats are missing
-    "--js-runtimes",
-    `node:${process.execPath}`,
-    ...getCookiesArgs(),
+    ...getCommonYtDlpArgs(),
   ];
 
   const stdout = await new Promise<string>((resolve, reject) => {
@@ -329,6 +304,19 @@ function ytDlpEntryToSearchableVideo(entry: any): SearchableVideo | null {
     },
     thumbnails: thumbnails.length ? thumbnails : null,
   };
+}
+
+/** Поиск без извлечения видео: возвращает первый результат или null, если что-то пошло не так */
+async function ytDlpSearchFlat(query: string): Promise<SearchableVideo | null> {
+  try {
+    const json = await ytDlpDumpSingleJson(["--flat-playlist", "--dump-single-json", `ytsearch1:${query}`]);
+    const entry = Array.isArray(json?.entries) ? json.entries.find(Boolean) : null;
+    const video = ytDlpEntryToSearchableVideo(entry);
+    return video?.url && video.title ? video : null;
+  } catch (error) {
+    console.warn("[trackResolver] Flat search failed, falling back to full extraction:", error);
+    return null;
+  }
 }
 
 async function ytDlpResolveSingle(input: string): Promise<SearchableVideo | null> {
