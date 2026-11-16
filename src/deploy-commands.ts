@@ -9,6 +9,9 @@ import { stopCommand } from "./commands/stop";
 import { pauseCommand } from "./commands/pause";
 import { resumeCommand } from "./commands/resume";
 import { queueCommand } from "./commands/queue";
+import { volumeCommand } from "./commands/volume";
+import { loopCommand } from "./commands/loop";
+import { shuffleCommand } from "./commands/shuffle";
 
 const commands = [
   playCommand,
@@ -20,6 +23,9 @@ const commands = [
   pauseCommand,
   resumeCommand,
   queueCommand,
+  volumeCommand,
+  loopCommand,
+  shuffleCommand,
 ].map((cmd) => cmd.data.toJSON());
 
 const rest = new REST().setToken(process.env.DISCORD_TOKEN!);

@@ -11,7 +11,7 @@ import {
   VoiceConnectionDisconnectReason,
 } from "@discordjs/voice";
 import { EmbedBuilder, Message, TextChannel, VoiceChannel } from "discord.js";
-import { Track } from "../types/music";
+import { LoopMode, Track } from "../types/music";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import path from "path";
 import fs from "fs";
@@ -28,6 +28,12 @@ export class GuildQueue {
   public isPlaying = false;
   public isPaused = false;
 
+  public static readonly MIN_VOLUME = 1;
+  public static readonly MAX_VOLUME = 200;
+  /** Громкость в процентах (100 = исходная) */
+  public volume = 100;
+  public loopMode: LoopMode = "off";
+
   public readonly player: AudioPlayer;
   public connection: VoiceConnection;
 
@@ -36,6 +42,13 @@ export class GuildQueue {
   private _ffmpegProcess: ChildProcessWithoutNullStreams | null = null;
   private _isDestroyingConnection = false;
   private _nowPlayingMessage: Message | null = null;
+  private _currentResource: AudioResource | null = null;
+  /** Трек пропущен через /skip — при повторе трека не крутим его заново */
+  private _skipRequested = false;
+  /** Трек уже возвращён в очередь (restartCurrent) — не добавлять его повторно */
+  private _suppressRequeue = false;
+  /** Текущий трек реально начал играть (сломанные треки не повторяем) */
+  private _currentStarted = false;
 
   constructor(
     connection: VoiceConnection,
@@ -66,6 +79,7 @@ export class GuildQueue {
 
     this._isTransitioning = true;
     this.currentTrack = this.tracks.shift()!;
+    this._currentStarted = false;
     this.isPlaying = true;
     this.isPaused = false;
 
@@ -211,13 +225,19 @@ export class GuildQueue {
       ffmpegProcess.stdin.write(firstStdoutChunk);
       ytDlpProcess.stdout.pipe(ffmpegProcess.stdin);
 
-      const resource: AudioResource = createAudioResource(ffmpegProcess.stdout, { inputType: StreamType.Raw });
+      const resource: AudioResource = createAudioResource(ffmpegProcess.stdout, {
+        inputType: StreamType.Raw,
+        inlineVolume: true,
+      });
+      resource.volume?.setVolume(this.volume / 100);
+      this._currentResource = resource;
 
       this.player.play(resource);
       console.log("[GuildQueue] player.play() called, waiting for Playing...");
 
       await entersState(this.player, AudioPlayerStatus.Playing, 15_000);
       console.log("[GuildQueue] Player entered Playing state.");
+      this._currentStarted = true;
 
       const nowPlayingEmbed = new EmbedBuilder()
         .setColor(0x1f9d8b)
@@ -268,6 +288,7 @@ export class GuildQueue {
 
   public skip(): boolean {
     if (!this.isPlaying) return false;
+    this._skipRequested = true;
     this._cleanupPlaybackPipeline();
     this.player.stop(true);
     return true;
@@ -290,9 +311,48 @@ export class GuildQueue {
   public restartCurrent(): boolean {
     if (!this.currentTrack || !this.isPlaying) return false;
     this.tracks.unshift(this.currentTrack);
+    this._suppressRequeue = true;
     this._cleanupPlaybackPipeline();
     this.player.stop(true);
     return true;
+  }
+
+  /** Устанавливает громкость в процентах, возвращает итоговое значение */
+  public setVolume(percent: number): number {
+    const clamped = Math.min(GuildQueue.MAX_VOLUME, Math.max(GuildQueue.MIN_VOLUME, Math.round(percent)));
+    this.volume = clamped;
+    this._currentResource?.volume?.setVolume(clamped / 100);
+    return clamped;
+  }
+
+  public setLoopMode(mode: LoopMode): void {
+    this.loopMode = mode;
+  }
+
+  /** Перемешивает треки в очереди (текущий не трогает), возвращает их количество */
+  public shuffle(): number {
+    for (let i = this.tracks.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.tracks[i], this.tracks[j]] = [this.tracks[j], this.tracks[i]];
+    }
+    return this.tracks.length;
+  }
+
+  /** Возвращает закончившийся трек в очередь в зависимости от режима повтора */
+  private _requeueFinishedTrack(): void {
+    const finished = this.currentTrack;
+    const skipped = this._skipRequested;
+    const suppressed = this._suppressRequeue;
+    this._skipRequested = false;
+    this._suppressRequeue = false;
+
+    if (!finished || suppressed || !this._currentStarted) return;
+
+    if (this.loopMode === "track" && !skipped) {
+      this.tracks.unshift(finished);
+    } else if (this.loopMode === "queue") {
+      this.tracks.push(finished);
+    }
   }
 
   public pause(): boolean {
@@ -315,6 +375,7 @@ export class GuildQueue {
         oldState.status === AudioPlayerStatus.Playing ||
         oldState.status === AudioPlayerStatus.Buffering
       ) {
+        this._requeueFinishedTrack();
         this.playNext().catch(console.error);
       }
     });
@@ -424,6 +485,7 @@ export class GuildQueue {
 
   private _resetPlaybackState(): void {
     this.currentTrack = null;
+    this._currentResource = null;
     this.isPlaying = false;
     this.isPaused = false;
   }

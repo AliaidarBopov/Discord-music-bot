@@ -10,6 +10,9 @@ import { stopCommand } from "./commands/stop";
 import { pauseCommand } from "./commands/pause";
 import { resumeCommand } from "./commands/resume";
 import { queueCommand } from "./commands/queue";
+import { volumeCommand } from "./commands/volume";
+import { loopCommand } from "./commands/loop";
+import { shuffleCommand } from "./commands/shuffle";
 import { handleMusicControlButton, isMusicControlButton } from "./commands/musicControls";
 
 const client = new Client({
@@ -19,8 +22,20 @@ const client = new Client({
   ],
 });
 
-[playCommand, mashupCommand, gachiCommand, playlistCommand, skipCommand, stopCommand, pauseCommand, resumeCommand, queueCommand]
-  .forEach((cmd) => commandHandler.register(cmd));
+[
+  playCommand,
+  mashupCommand,
+  gachiCommand,
+  playlistCommand,
+  skipCommand,
+  stopCommand,
+  pauseCommand,
+  resumeCommand,
+  queueCommand,
+  volumeCommand,
+  loopCommand,
+  shuffleCommand,
+].forEach((cmd) => commandHandler.register(cmd));
 
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Бот запущен как ${c.user.tag}`);

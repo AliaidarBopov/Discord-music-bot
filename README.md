@@ -16,7 +16,7 @@ A fully-featured Discord music bot built with TypeScript, discord.js v14, and yt
 - **Discord:** discord.js v14
 - **Voice:** @discordjs/voice v0.19
 - **Audio:** yt-dlp + ffmpeg-static
-- **Search:** play-dl
+- **Search:** yt-dlp (`ytsearch1:`)
 
 ## Setup
 
@@ -90,6 +90,11 @@ npm start
 | `/pause` | Pause the current track |
 | `/resume` | Resume playback |
 | `/queue` | Show the current queue |
+| `/volume [уровень]` | Show or set volume (1–200%, 100 is normal) |
+| `/loop <режим>` | Loop off / current track / whole queue |
+| `/shuffle` | Shuffle the queued tracks |
+| `/playlist <url>` | Queue a YouTube playlist |
+| `/mashup`, `/gachi` | Play a random track from a preset list |
 
 ## Project Structure
 

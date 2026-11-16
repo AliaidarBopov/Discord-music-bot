@@ -9,6 +9,9 @@ export interface Track {
   thumbnailUrl?: string;
 }
 
+/** off — без повтора, track — повтор текущего трека, queue — повтор всей очереди */
+export type LoopMode = "off" | "track" | "queue";
+
 export interface GuildQueueOptions {
   guildId: string;
   voiceChannel: VoiceChannel;
