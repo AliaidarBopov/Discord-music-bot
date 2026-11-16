@@ -1,5 +1,7 @@
 import { EmbedBuilder } from "discord.js";
-import play from "play-dl";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 import { Track } from "../types/music";
 
 type SearchableVideo = {
@@ -37,15 +39,12 @@ export async function resolveSingleTrack(query: string, requestedBy: string): Pr
     const isUrl = query.startsWith("https://") || query.startsWith("http://");
 
     if (isUrl) {
-      const info = await play.video_info(query);
-      return mapVideoToTrack(info.video_details as SearchableVideo, requestedBy);
+      const video = await ytDlpResolveSingle(query);
+      return video ? mapVideoToTrack(video, requestedBy) : null;
     }
 
-    const results = await play.search(query, { source: { youtube: "video" }, limit: 1 });
-    const video = results[0];
-    if (!video?.url) return null;
-
-    return mapVideoToTrack(video as SearchableVideo, requestedBy);
+    const video = await ytDlpResolveSingle(`ytsearch1:${query}`);
+    return video ? mapVideoToTrack(video, requestedBy) : null;
   } catch (error) {
     console.error("[resolveSingleTrack] Failed to resolve single track:", error);
     return null;
@@ -69,12 +68,19 @@ export async function resolvePlaylistTracks(query: string, requestedBy: string):
     : query;
 
   try {
-    const playlist = await play.playlist_info(playlistUrl, { incomplete: true });
-    const videos = await playlist.all_videos();
+    const json = await ytDlpDumpSingleJson([
+      "--flat-playlist",
+      "--dump-single-json",
+      "--no-playlist", // we want playlist entries only, not nested playlists
+      playlistUrl,
+    ]);
 
-    return videos
-      .filter((video) => Boolean(video?.url))
-      .map((video) => mapVideoToTrack(video as SearchableVideo, requestedBy));
+    const entries = Array.isArray(json?.entries) ? json.entries : [];
+    const videos = entries
+      .map((entry: any): SearchableVideo | null => ytDlpEntryToSearchableVideo(entry))
+      .filter((video: SearchableVideo | null): video is SearchableVideo => Boolean(video?.url));
+
+    return videos.map((video: SearchableVideo) => mapVideoToTrack(video, requestedBy));
   } catch (error) {
     console.error("[resolvePlaylistTracks] Failed to resolve playlist:", error);
     return [];
@@ -211,4 +217,125 @@ function shuffleInPlace<T>(values: T[]): void {
     const j = Math.floor(Math.random() * (i + 1));
     [values[i], values[j]] = [values[j], values[i]];
   }
+}
+
+function getYtDlpPath(): string {
+  return path.join(
+    __dirname,
+    "..",
+    "..",
+    "node_modules",
+    "youtube-dl-exec",
+    "bin",
+    process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+  );
+}
+
+function getCookiesArgs(): string[] {
+  const cookiesPath = (process.env.YTDLP_COOKIES ?? "").trim();
+  if (!cookiesPath) return [];
+  if (!fs.existsSync(cookiesPath)) {
+    console.warn(`[trackResolver] YTDLP_COOKIES file not found: ${cookiesPath}`);
+    return [];
+  }
+  return ["--cookies", cookiesPath];
+}
+
+async function ytDlpDumpSingleJson(args: string[]): Promise<any> {
+  const ytDlpPath = getYtDlpPath();
+  const baseArgs = [
+    "--quiet",
+    "--no-warnings",
+    "--no-call-home",
+    "--no-check-certificate",
+    "--socket-timeout",
+    "15",
+    "--retries",
+    "2",
+    // YouTube requires solving JS challenges; without a runtime some formats are missing
+    "--js-runtimes",
+    `node:${process.execPath}`,
+    ...getCookiesArgs(),
+  ];
+
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const proc = spawn(ytDlpPath, [...baseArgs, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let out = "";
+    let err = "";
+
+    proc.stdout.on("data", (d) => {
+      out += d.toString();
+    });
+
+    proc.stderr.on("data", (d) => {
+      err += d.toString();
+      if (err.length > 20_000) err = err.slice(-20_000);
+    });
+
+    proc.on("error", (e) => reject(e));
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(out.trim());
+        return;
+      }
+
+      reject(new Error(err.trim() || `yt-dlp exited with code ${code}`));
+    });
+  });
+
+  if (!stdout) throw new Error("yt-dlp returned empty JSON");
+  return JSON.parse(stdout);
+}
+
+function ytDlpEntryToSearchableVideo(entry: any): SearchableVideo | null {
+  if (!entry) return null;
+
+  const url =
+    typeof entry.webpage_url === "string"
+      ? entry.webpage_url
+      : typeof entry.url === "string" && /^https?:\/\//i.test(entry.url)
+        ? entry.url
+        : typeof entry.id === "string"
+          ? `https://www.youtube.com/watch?v=${entry.id}`
+          : typeof entry.url === "string"
+            ? `https://www.youtube.com/watch?v=${entry.url}`
+            : "";
+
+  if (!url) return null;
+
+  const thumbnails: Array<{ url: string }> = [];
+  if (typeof entry.thumbnail === "string") thumbnails.push({ url: entry.thumbnail });
+  if (Array.isArray(entry.thumbnails)) {
+    for (const t of entry.thumbnails) {
+      if (t && typeof t.url === "string") thumbnails.push({ url: t.url });
+    }
+  }
+
+  return {
+    title: typeof entry.title === "string" ? entry.title : null,
+    url,
+    durationInSec: entry.duration ?? null,
+    channel: {
+      name:
+        typeof entry.uploader === "string"
+          ? entry.uploader
+          : typeof entry.channel === "string"
+            ? entry.channel
+            : null,
+    },
+    thumbnails: thumbnails.length ? thumbnails : null,
+  };
+}
+
+async function ytDlpResolveSingle(input: string): Promise<SearchableVideo | null> {
+  // For URLs this returns the video's JSON.
+  // For ytsearch1:... it may return either a single video JSON or a playlist-like JSON with entries.
+  const json = await ytDlpDumpSingleJson(["--dump-single-json", "--no-playlist", input]);
+
+  const candidate = Array.isArray(json?.entries) ? json.entries.find(Boolean) : json;
+  return ytDlpEntryToSearchableVideo(candidate);
 }

@@ -1,0 +1,26 @@
+{
+  // F5 — запустить бота, Shift+F5 — остановить, Ctrl+Shift+F5 — перезапустить
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Запустить бота",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["-r", "ts-node/register"],
+      "program": "${workspaceFolder}/src/index.ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "name": "Зарегистрировать слэш-команды",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["-r", "ts-node/register"],
+      "program": "${workspaceFolder}/src/deploy-commands.ts",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    }
+  ]
+}

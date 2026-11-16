@@ -102,6 +102,9 @@ export class GuildQueue {
         // Keep it conservative when streaming to stdout
         "--concurrent-fragments",
         "1",
+        // YouTube requires solving JS challenges; without a runtime it returns 403
+        "--js-runtimes",
+        `node:${process.execPath}`,
       ];
 
       const cookiesPath = (process.env.YTDLP_COOKIES ?? "").trim();

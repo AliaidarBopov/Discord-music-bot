@@ -1,0 +1,34 @@
+{
+  // Ctrl+Shift+P -> "Tasks: Run Task" -> выбрать задачу
+  // npm.cmd вместо npm: в PowerShell отключено выполнение скриптов, и npm.ps1 не запускается
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Бот: запустить",
+      "type": "shell",
+      "command": "npm.cmd run dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always", "clear": true }
+    },
+    {
+      "label": "Бот: зарегистрировать слэш-команды",
+      "type": "shell",
+      "command": "npm.cmd run deploy",
+      "problemMatcher": []
+    },
+    {
+      "label": "Бот: установить зависимости",
+      "type": "shell",
+      "command": "npm.cmd install",
+      "problemMatcher": []
+    },
+    {
+      "label": "Бот: собрать (build)",
+      "type": "shell",
+      "command": "npm.cmd run build",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    }
+  ]
+}
