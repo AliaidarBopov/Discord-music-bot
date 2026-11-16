@@ -15,7 +15,14 @@ import { LoopMode, Track } from "../types/music";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import ffmpegStatic from "ffmpeg-static";
 import { createNowPlayingControlsRow } from "../commands/musicControls";
-import { AUDIO_FORMAT, getCommonYtDlpArgs, getYtDlpPath } from "./ytDlp";
+import {
+  AUDIO_FORMAT,
+  YTDLP_MAX_ATTEMPTS,
+  getCommonYtDlpArgs,
+  getYtDlpPath,
+  isRetryableYtDlpError,
+  ytDlpRetryDelay,
+} from "./ytDlp";
 import { TrackPrefetcher, removeFile } from "./TrackPrefetcher";
 
 export class GuildQueue {
@@ -277,8 +284,27 @@ export class GuildQueue {
     this._prefetcher.prefetch(this._nextTrackUrl());
   }
 
-  /** Запускает yt-dlp в stdout и ждёт первые данные (чтобы ffmpeg не получил пустой поток) */
+  /** Запускает поток yt-dlp, при случайном 403 от YouTube пробует ещё раз */
   private async _startYtDlpStream(
+    url: string
+  ): Promise<{ process: ChildProcessWithoutNullStreams; firstChunk: Buffer }> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this._spawnYtDlpStreamOnce(url);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const canRetry =
+          attempt < YTDLP_MAX_ATTEMPTS && isRetryableYtDlpError(message) && this.currentTrack?.url === url;
+        if (!canRetry) throw error;
+        console.warn(`[GuildQueue] yt-dlp attempt ${attempt}/${YTDLP_MAX_ATTEMPTS} got 403, retrying...`);
+        await ytDlpRetryDelay(attempt);
+        if (this.currentTrack?.url !== url) throw error;
+      }
+    }
+  }
+
+  /** Запускает yt-dlp в stdout и ждёт первые данные (чтобы ffmpeg не получил пустой поток) */
+  private async _spawnYtDlpStreamOnce(
     url: string
   ): Promise<{ process: ChildProcessWithoutNullStreams; firstChunk: Buffer }> {
     const ytDlpArgs: string[] = [

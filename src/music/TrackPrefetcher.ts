@@ -3,7 +3,15 @@ import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { AUDIO_FORMAT, getCommonYtDlpArgs, getYtDlpPath } from "./ytDlp";
+import {
+  AUDIO_FORMAT,
+  YTDLP_MAX_ATTEMPTS,
+  getCommonYtDlpArgs,
+  getYtDlpPath,
+  isRetryableYtDlpError,
+  lastYtDlpError,
+  ytDlpRetryDelay,
+} from "./ytDlp";
 
 const PREFETCH_DIR = path.join(os.tmpdir(), "discord-music-bot-prefetch");
 
@@ -17,7 +25,9 @@ try {
 interface PrefetchEntry {
   url: string;
   filePath: string;
-  process: ChildProcess;
+  /** Текущий процесс yt-dlp (меняется между попытками) */
+  process: ChildProcess | null;
+  cancelled: boolean;
   /** Путь к файлу, когда скачивание завершилось, или null при ошибке/отмене */
   done: Promise<string | null>;
 }
@@ -36,57 +46,17 @@ export class TrackPrefetcher {
     if (!url) return;
 
     fs.mkdirSync(PREFETCH_DIR, { recursive: true });
-    const filePath = path.join(PREFETCH_DIR, `${crypto.randomUUID()}.audio`);
-
-    const proc = spawn(
-      getYtDlpPath(),
-      [
-        "-f",
-        AUDIO_FORMAT,
-        "-o",
-        filePath,
-        "--quiet",
-        "--no-warnings",
-        "--no-playlist",
-        "--no-part",
-        "--force-overwrites",
-        "--retries",
-        "3",
-        "--socket-timeout",
-        "15",
-        ...getCommonYtDlpArgs(),
-        url,
-      ],
-      { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
-    );
-
-    let stderr = "";
-    proc.stderr?.on("data", (d) => {
-      stderr += d.toString();
-      if (stderr.length > 5_000) stderr = stderr.slice(-5_000);
-    });
-
-    const done = new Promise<string | null>((resolve) => {
-      proc.once("error", (err) => {
-        console.warn("[prefetch] spawn error:", err);
-        resolve(null);
-      });
-      proc.once("close", (code) => {
-        if (code === 0 && fs.existsSync(filePath)) {
-          console.log(`[prefetch] Ready: ${url}`);
-          resolve(filePath);
-          return;
-        }
-        if (this._entry?.process === proc) {
-          console.warn(`[prefetch] Failed (${code}) for ${url}:`, stderr.trim());
-        }
-        removeFile(filePath);
-        resolve(null);
-      });
-    });
+    const entry: PrefetchEntry = {
+      url,
+      filePath: path.join(PREFETCH_DIR, `${crypto.randomUUID()}.audio`),
+      process: null,
+      cancelled: false,
+      done: Promise.resolve(null),
+    };
 
     console.log(`[prefetch] Started: ${url}`);
-    this._entry = { url, filePath, process: proc, done };
+    entry.done = this._download(entry);
+    this._entry = entry;
   }
 
   /**
@@ -105,12 +75,74 @@ export class TrackPrefetcher {
     const entry = this._entry;
     if (!entry) return;
     this._entry = null;
+    entry.cancelled = true;
 
-    if (entry.process.exitCode === null && !entry.process.killed) {
-      entry.process.kill();
+    const proc = entry.process;
+    if (proc && proc.exitCode === null && !proc.killed) {
+      proc.kill();
     }
     void entry.done.then((filePath) => {
       if (filePath) removeFile(filePath);
+    });
+  }
+
+  private async _download(entry: PrefetchEntry): Promise<string | null> {
+    for (let attempt = 1; attempt <= YTDLP_MAX_ATTEMPTS && !entry.cancelled; attempt += 1) {
+      const result = await this._downloadOnce(entry);
+      if (result.ok) {
+        console.log(`[prefetch] Ready: ${entry.url}`);
+        return entry.filePath;
+      }
+      if (entry.cancelled) break;
+
+      const retryable = isRetryableYtDlpError(result.stderr);
+      console.warn(
+        `[prefetch] Attempt ${attempt}/${YTDLP_MAX_ATTEMPTS} failed for ${entry.url}: ${lastYtDlpError(result.stderr)}` +
+          (retryable && attempt < YTDLP_MAX_ATTEMPTS ? " — retrying" : "")
+      );
+      if (!retryable) break;
+      if (attempt < YTDLP_MAX_ATTEMPTS) await ytDlpRetryDelay(attempt);
+    }
+
+    removeFile(entry.filePath);
+    return null;
+  }
+
+  private _downloadOnce(entry: PrefetchEntry): Promise<{ ok: boolean; stderr: string }> {
+    return new Promise((resolve) => {
+      const proc = spawn(
+        getYtDlpPath(),
+        [
+          "-f",
+          AUDIO_FORMAT,
+          "-o",
+          entry.filePath,
+          "--quiet",
+          "--no-warnings",
+          "--no-playlist",
+          "--no-part",
+          "--force-overwrites",
+          "--retries",
+          "3",
+          "--socket-timeout",
+          "15",
+          ...getCommonYtDlpArgs(),
+          entry.url,
+        ],
+        { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
+      );
+      entry.process = proc;
+
+      let stderr = "";
+      proc.stderr?.on("data", (d) => {
+        stderr += d.toString();
+        if (stderr.length > 5_000) stderr = stderr.slice(-5_000);
+      });
+
+      proc.once("error", (err) => resolve({ ok: false, stderr: String(err) }));
+      proc.once("close", (code) => {
+        resolve({ ok: code === 0 && fs.existsSync(entry.filePath), stderr });
+      });
     });
   }
 }
