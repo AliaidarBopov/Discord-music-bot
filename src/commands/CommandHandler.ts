@@ -21,10 +21,39 @@ class CommandHandler {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[CommandHandler] Ошибка в команде "${interaction.commandName}":`, err);
+
       const msg = { content: `❌ Ошибка: \`${errorMessage}\``, ephemeral: true };
-      interaction.replied || interaction.deferred
-        ? await interaction.followUp(msg)
-        : await interaction.reply(msg);
+
+      const trySend = async (): Promise<void> => {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply(msg);
+          return;
+        }
+
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(msg);
+          return;
+        }
+
+        await interaction.reply(msg);
+      };
+
+      try {
+        await trySend();
+      } catch (sendErr: unknown) {
+        // Common when the same interaction was already responded to (e.g., multiple bot instances)
+        const code = (sendErr as { code?: number | string } | null)?.code;
+        if (code === 40060) {
+          try {
+            await interaction.followUp(msg);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        console.error("[CommandHandler] Не удалось отправить сообщение об ошибке:", sendErr);
+      }
     }
   }
 

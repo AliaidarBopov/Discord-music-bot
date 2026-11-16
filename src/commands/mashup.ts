@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 import { Command } from "./CommandHandler";
 import { getPlaybackContext, queueTracksAndReply } from "./playbackCommandUtils";
 import { resolveRandomTrack } from "../music/trackResolver";
@@ -25,7 +25,7 @@ export const mashupCommand: Command = {
     const context = await getPlaybackContext(interaction);
     if (!context) return;
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const track = await resolveRandomTrack(MASHUP_QUERIES, context.requestedBy);
     if (!track) {

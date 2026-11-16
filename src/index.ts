@@ -26,6 +26,22 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ Бот запущен как ${c.user.tag}`);
 });
 
+client.on("error", (err) => {
+  console.error("[discord.js] Client error:", err);
+});
+
+client.on("shardError", (err) => {
+  console.error("[discord.js] Shard error:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Unhandled rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[process] Uncaught exception:", err);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton() && isMusicControlButton(interaction.customId)) {
     await handleMusicControlButton(interaction);

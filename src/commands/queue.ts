@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, MessageFlags } from "discord.js";
 import { Command } from "./CommandHandler";
 import { musicManager } from "../music/MusicManager";
 
@@ -11,7 +11,7 @@ export const queueCommand: Command = {
     const queue = musicManager.getQueue(interaction.guildId!);
 
     if (!queue?.isPlaying) {
-      await interaction.reply({ content: "📭 Очередь пуста.", ephemeral: true });
+      await interaction.reply({ content: "📭 Очередь пуста.", flags: MessageFlags.Ephemeral });
       return;
     }
 

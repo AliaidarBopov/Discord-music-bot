@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 import { Command } from "./CommandHandler";
 import { musicManager } from "../music/MusicManager";
 
@@ -11,7 +11,7 @@ export const stopCommand: Command = {
     const queue = musicManager.getQueue(interaction.guildId!);
 
     if (!queue) {
-      await interaction.reply({ content: "⏹️ Бот не в голосовом канале.", ephemeral: true });
+      await interaction.reply({ content: "⏹️ Бот не в голосовом канале.", flags: MessageFlags.Ephemeral });
       return;
     }
 

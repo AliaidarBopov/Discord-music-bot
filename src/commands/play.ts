@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 import { Command } from "./CommandHandler";
 import { getPlaybackContext, queueTracksAndReply } from "./playbackCommandUtils";
 import { resolveTracks } from "../music/trackResolver";
@@ -19,7 +19,7 @@ export const playCommand: Command = {
     if (!context) return;
 
     const query = interaction.options.getString("запрос", true);
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const tracks = await resolveTracks(query, context.requestedBy);
     if (tracks.length === 0) {
